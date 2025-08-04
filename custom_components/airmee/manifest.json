@@ -7,5 +7,5 @@
   "iot_class": "cloud_polling",
   "integration_type": "service",
   "codeowners": ["@alvesvaren"],
-  "documentation": "https://github.com/alvesvaren/homeassistant-airmee",
+  "documentation": "https://github.com/alvesvaren/homeassistant-airmee"
 }
