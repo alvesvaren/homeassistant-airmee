@@ -1,11 +1,12 @@
 {
   "domain": "airmee",
   "name": "Airmee",
-  "version": "0.1.0",
-  "requirements": [],
-  "config_flow": true,
-  "iot_class": "cloud_polling",
-  "integration_type": "service",
   "codeowners": ["@alvesvaren"],
-  "documentation": "https://github.com/alvesvaren/homeassistant-airmee"
+  "config_flow": true,
+  "documentation": "https://github.com/alvesvaren/homeassistant-airmee",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/alvesvaren/homeassistant-airmee/issues",
+  "requirements": [],
+  "version": "0.1.0",
 }
