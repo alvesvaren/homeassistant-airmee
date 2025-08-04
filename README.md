@@ -4,6 +4,8 @@ Airmee integration for home assistant, allowing you to see the next package ETA,
 
 This is still a work in progress and hasn't been tested that thoroughly. It is mostly "vibe-coded" so not sure how well it follows best practices for HA.
 
+It also uses reverse-engineered API endpoints without any public documentation so stuff might break if airmee changes their backend.
+
 ## Installation (using HACS)
 1. Add `https://github.com/alvesvaren/homeassistant-airmee` as a custom repository
 2. Search up airmee and install it
