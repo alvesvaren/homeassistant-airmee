@@ -1,0 +1,10 @@
+{
+  "domain": "airmee",
+  "name": "Airmee",
+  "version": "0.1.0",
+  "requirements": [],
+  "config_flow": true,
+  "iot_class": "cloud_polling",
+  "integration_type": "service",
+  "platforms": ["sensor"]
+}
