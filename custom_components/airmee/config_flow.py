@@ -6,7 +6,6 @@ import time
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.config_entries import SOURCE_REAUTH
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -73,7 +72,30 @@ class AirmeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
         self._last_otp_request = now
 
-        # send OTP
+        if error := await self._send_otp():
+            return self.async_show_form(step_id="user", data_schema=schema, errors={"base": error})
+
+        return await self.async_step_otp()
+
+    async def async_step_otp(self, user_input=None):
+        schema = vol.Schema({vol.Required("otp_code"): str})
+
+        if user_input is None:
+            return self.async_show_form(step_id="otp", data_schema=schema)
+
+        tokens, error = await self._verify_otp(user_input["otp_code"])
+        if error:
+            return self.async_show_form(step_id="otp", data_schema=schema, errors={"base": error})
+
+        entry_data = {
+            CONF_PHONE_NUMBER: self._phone,
+            CONF_COUNTRY_CODE: self._country,
+            **tokens,
+        }
+        return self.async_create_entry(title=f"Airmee {self._phone}", data=entry_data)
+
+    async def _send_otp(self) -> str | None:
+        """Request an SMS code. Return an error message, or None on success."""
         url = "https://api.airmee.com/customer/register/sendOtp"
         payload = {
             "phone_number": int(self._phone),
@@ -92,8 +114,7 @@ class AirmeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data = await resp.json()
                 except Exception:
                     data = {}
-                extra = data.get("extraMessage") or data.get("message") or text or "Failed to request OTP"
-                return self.async_show_form(step_id="user", data_schema=schema, errors={"base": extra})
+                return data.get("extraMessage") or data.get("message") or text or "Failed to request OTP"
             data = await resp.json()
 
         self._temp_token = data.get("temp_token")
@@ -101,19 +122,11 @@ class AirmeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if not self._temp_token or not self._otp_hash:
             _LOGGER.error("Missing temp_token or otp_hash in response: %s", data)
-            return self.async_show_form(
-                step_id="user", data_schema=schema, errors={"base": "Invalid response from sendOtp"}
-            )
+            return "Invalid response from sendOtp"
+        return None
 
-        return await self.async_step_otp()
-
-    async def async_step_otp(self, user_input=None):
-        schema = vol.Schema({vol.Required("otp_code"): str})
-
-        if user_input is None:
-            return self.async_show_form(step_id="otp", data_schema=schema)
-
-        otp_code = user_input["otp_code"]
+    async def _verify_otp(self, otp_code: str) -> tuple[dict | None, str | None]:
+        """Exchange the SMS code for tokens. Return (entry data, error message)."""
         url = "https://api.airmee.com/customer/register/verifyOtp"
         payload = {
             "otp_code": otp_code,
@@ -134,125 +147,57 @@ class AirmeeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data = await resp.json()
                 except Exception:
                     data = {}
-                extra = data.get("extraMessage") or data.get("message") or text or "OTP verification failed"
-                return self.async_show_form(step_id="otp", data_schema=schema, errors={"base": extra})
+                return None, data.get("extraMessage") or data.get("message") or text or "OTP verification failed"
             data = await resp.json()
 
         access_token = data.get("access_token")
         refresh_token = data.get("refresh_token")
         if not access_token or not refresh_token:
             _LOGGER.error("Missing tokens in verify response: %s", data)
-            return self.async_show_form(
-                step_id="otp", data_schema=schema, errors={"base": "Invalid response from verifyOtp"}
-            )
+            return None, "Invalid response from verifyOtp"
 
-        expires_at = _parse_exp_from_jwt(access_token)
-
-        entry_data = {
-            CONF_PHONE_NUMBER: self._phone,
-            CONF_COUNTRY_CODE: self._country,
+        return {
             CONF_ACCESS_TOKEN: access_token,
             CONF_REFRESH_TOKEN: refresh_token,
-            CONF_EXPIRES_AT: expires_at,
-        }
+            CONF_EXPIRES_AT: _parse_exp_from_jwt(access_token),
+        }, None
 
-        return self.async_create_entry(title=f"Airmee {self._phone}", data=entry_data)
-
-    async def async_step_reauth(self, user_input=None):
-        """Handle reauthentication when the credentials expired."""
+    async def async_step_reauth(self, entry_data):
+        """Start reauthentication after the refresh token has expired."""
         entry = self._get_reauth_entry()
         self._phone = entry.data[CONF_PHONE_NUMBER]
         self._country = entry.data[CONF_COUNTRY_CODE]
+        return await self.async_step_reauth_confirm()
 
-        # ensure we are reauthenticating the same unique_id
-        await self.async_set_unique_id(f"{self._country}_{self._phone}")
-        self._abort_if_unique_id_mismatch()
-
-        schema = vol.Schema({vol.Required("otp_code"): str})
-
-        # On first entry into reauth, send a new OTP if not already done
-        if not self._temp_token or not self._otp_hash:
-            url = "https://api.airmee.com/customer/register/sendOtp"
-            payload = {
-                "phone_number": int(self._phone),
-                "country_code": int(self._country),
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": "TEMP_TOKEN",
-            }
-
-            session = async_get_clientsession(self.hass)
-            async with session.post(url, json=payload, headers=headers) as resp:
-                text = await resp.text()
-                if resp.status != 200:
-                    try:
-                        data = await resp.json()
-                    except Exception:
-                        data = {}
-                    extra = data.get("extraMessage") or data.get("message") or text or "Failed to request OTP"
-                    return self.async_show_form(
-                        step_id="reauth", data_schema=schema, errors={"base": extra}
-                    )
-                data = await resp.json()
-
-            self._temp_token = data.get("temp_token")
-            self._otp_hash = data.get("otp_hash_code")
-
-            if not self._temp_token or not self._otp_hash:
-                _LOGGER.error("Missing temp_token or otp_hash in reauth response: %s", data)
-                return self.async_show_form(
-                    step_id="reauth", data_schema=schema, errors={"base": "Invalid response from sendOtp"}
-                )
-
-        # If user hasn't submitted OTP yet, ask for it
+    async def async_step_reauth_confirm(self, user_input=None):
+        """Wait for the user before sending the SMS, so the code is fresh."""
         if user_input is None:
-            return self.async_show_form(step_id="reauth", data_schema=schema)
-
-        # Verify OTP
-        otp_code = user_input["otp_code"]
-        url = "https://api.airmee.com/customer/register/verifyOtp"
-        payload = {
-            "otp_code": otp_code,
-            "otp_hash_code": self._otp_hash,
-            "phone_number": int(self._phone),
-            "country_code": int(self._country),
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": self._temp_token,
-        }
-
-        session = async_get_clientsession(self.hass)
-        async with session.post(url, json=payload, headers=headers) as resp:
-            text = await resp.text()
-            if resp.status != 200:
-                try:
-                    data = await resp.json()
-                except Exception:
-                    data = {}
-                extra = data.get("extraMessage") or data.get("message") or text or "OTP verification failed"
-                return self.async_show_form(step_id="reauth", data_schema=schema, errors={"base": extra})
-            data = await resp.json()
-
-        access_token = data.get("access_token")
-        refresh_token = data.get("refresh_token")
-        if not access_token or not refresh_token:
-            _LOGGER.error("Missing tokens in reauth verify response: %s", data)
             return self.async_show_form(
-                step_id="reauth", data_schema=schema, errors={"base": "Invalid response from verifyOtp"}
+                step_id="reauth_confirm",
+                description_placeholders={"phone": f"+{self._country} {self._phone}"},
             )
 
-        expires_at = _parse_exp_from_jwt(access_token)
+        if error := await self._send_otp():
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                description_placeholders={"phone": f"+{self._country} {self._phone}"},
+                errors={"base": error},
+            )
+        return await self.async_step_reauth_otp()
 
-        updated_data = entry.data.copy()
-        updated_data.update(
-            {
-                CONF_ACCESS_TOKEN: access_token,
-                CONF_REFRESH_TOKEN: refresh_token,
-                CONF_EXPIRES_AT: expires_at,
-            }
+    async def async_step_reauth_otp(self, user_input=None):
+        """Verify the SMS code and store the new tokens on the entry."""
+        schema = vol.Schema({vol.Required("otp_code"): str})
+
+        if user_input is None:
+            return self.async_show_form(step_id="reauth_otp", data_schema=schema)
+
+        tokens, error = await self._verify_otp(user_input["otp_code"])
+        if error:
+            return self.async_show_form(
+                step_id="reauth_otp", data_schema=schema, errors={"base": error}
+            )
+
+        return self.async_update_reload_and_abort(
+            self._get_reauth_entry(), data_updates=tokens
         )
-
-        # Update the existing entry and reload it
-        return self.async_update_reload_and_abort(entry, data=updated_data)
