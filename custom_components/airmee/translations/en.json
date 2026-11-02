@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Airmee",
+        "description": "Enter your country code (46 for Sweden) and your phone number without the leading 0.",
+        "data": {
+          "country_code": "Country code",
+          "phone_number": "Phone number"
+        }
+      },
+      "otp": {
+        "title": "Enter code",
+        "description": "Enter the code Airmee sent by SMS.",
+        "data": {
+          "otp_code": "Code"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Log in to Airmee again",
+        "description": "The Airmee login has expired. Submit to send a new code by SMS to {phone}."
+      },
+      "reauth_otp": {
+        "title": "Enter code",
+        "description": "Enter the code Airmee sent by SMS.",
+        "data": {
+          "otp_code": "Code"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This phone number is already configured.",
+      "reauth_successful": "Logged in to Airmee again."
+    }
+  }
+}

@@ -97,9 +97,10 @@ class AirmeeDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             async with session.post(self.REFRESH_URL, json=payload, headers=headers, timeout=30) as resp:
                 text = await resp.text()
-                if resp.status == 401:
-                    _LOGGER.warning("Refresh token invalid, need reauth: %s", text)
-                    raise ConfigEntryAuthFailed("Refresh token invalid")
+                # Airmee answers 400 "Jwt is expired" once the refresh token is too old.
+                if resp.status in (400, 401):
+                    _LOGGER.warning("Refresh token rejected, need reauth: %s %s", resp.status, text)
+                    raise ConfigEntryAuthFailed("Refresh token expired")
                 if resp.status != 200:
                     _LOGGER.error("Failed to refresh token: %s %s", resp.status, text)
                     return
